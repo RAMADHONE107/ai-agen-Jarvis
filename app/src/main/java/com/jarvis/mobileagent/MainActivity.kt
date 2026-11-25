@@ -4,16 +4,21 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import android.text.InputType
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var output: TextView
+    private lateinit var apiKeyInput: EditText
+    private val secretStore by lazy { SecretStore(this) }
+    private val hermesClient by lazy { HermesClient() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -29,7 +34,7 @@ class MainActivity : Activity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.TOP
-            setPadding(28, 36, 28, 24)
+            setPadding(28, 36, 28, 28)
             setBackgroundColor(0xFFF4F7FB.toInt())
         }
         root.addView(TextView(this).apply {
@@ -39,11 +44,11 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER
         }, matchWrap())
         root.addView(TextView(this).apply {
-            text = "Mobile AI Agent • Tahap 0.2"
+            text = "Mobile AI Agent • Tahap 0.3 Hermes"
             textSize = 14f
             setTextColor(0xFF52657A.toInt())
             gravity = Gravity.CENTER
-            setPadding(0, 6, 0, 26)
+            setPadding(0, 6, 0, 22)
         }, matchWrap())
 
         status = TextView(this).apply {
@@ -54,41 +59,129 @@ class MainActivity : Activity() {
         }
         root.addView(status, matchWrap())
 
-        val input = EditText(this).apply {
+        root.addView(sectionTitle("Koneksi Hermes"), matchWrap().apply { topMargin = 22 })
+        apiKeyInput = EditText(this).apply {
+            hint = "Tempel API key Hermes di sini"
+            textSize = 14f
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+            setSingleLine(true)
+            setText(secretStore.readApiKey().orEmpty())
+            setPadding(14, 12, 14, 12)
+        }
+        root.addView(apiKeyInput, matchWrap())
+        root.addView(Button(this).apply {
+            text = "Simpan API key dengan aman"
+            setOnClickListener {
+                val key = apiKeyInput.text.toString().trim()
+                if (key.length < 16) {
+                    output.text = "API key belum valid. Periksa key di UserLAnd, jangan kirim key ke chat."
+                } else {
+                    secretStore.saveApiKey(key)
+                    apiKeyInput.setText("")
+                    output.text = "API key tersimpan terenkripsi di Android Keystore."
+                }
+            }
+        }, matchWrap())
+        root.addView(Button(this).apply {
+            text = "Tes koneksi Hermes"
+            setOnClickListener { testHermesConnection() }
+        }, matchWrap())
+
+        root.addView(sectionTitle("Chat dengan JARVIS"), matchWrap().apply { topMargin = 22 })
+        val prompt = EditText(this).apply {
+            hint = "Tulis pesan untuk Hermes..."
+            textSize = 16f
+            minLines = 2
+            maxLines = 4
+            setPadding(14, 12, 14, 12)
+        }
+        root.addView(prompt, matchWrap())
+        root.addView(Button(this).apply {
+            text = "Kirim ke Hermes"
+            setOnClickListener {
+                val message = prompt.text.toString().trim()
+                if (message.isBlank()) {
+                    output.text = "Tulis pesan terlebih dahulu."
+                } else {
+                    prompt.setText("")
+                    sendToHermes(message)
+                }
+            }
+        }, matchWrap())
+
+        root.addView(sectionTitle("Perintah perangkat"), matchWrap().apply { topMargin = 22 })
+        val localInput = EditText(this).apply {
             hint = "Contoh: buka Chrome"
             textSize = 16f
             setSingleLine(true)
             setPadding(14, 12, 14, 12)
         }
-        root.addView(input, matchWrap().apply { topMargin = 22 })
-
+        root.addView(localInput, matchWrap())
         root.addView(Button(this).apply {
-            text = "Jalankan perintah"
-            setOnClickListener { handleCommand(input.text.toString()) }
+            text = "Jalankan perintah lokal"
+            setOnClickListener { handleCommand(localInput.text.toString()) }
         }, matchWrap())
-
         root.addView(Button(this).apply {
             text = "Pengaturan Accessibility"
             setOnClickListener { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
         }, matchWrap())
 
         output = TextView(this).apply {
-            text = "Status: siap menerima perintah lokal."
+            text = "Status: siap. Simpan API key Hermes untuk mulai chat."
             textSize = 14f
             setTextColor(0xFF24364B.toInt())
             setPadding(4, 20, 4, 0)
         }
         root.addView(output, matchWrap())
-
         root.addView(TextView(this).apply {
-            text = "Mode aman: versi ini hanya membuka aplikasi yang ada dalam daftar izin. JARVIS belum membaca layar, mengetuk, mengetik, mengirim pesan, atau melakukan transaksi."
+            text = "Koneksi memakai 127.0.0.1:8642. Pastikan Hermes API Server aktif di UserLAnd. API key disimpan terenkripsi di Android Keystore dan tidak ditulis ke source code."
             textSize = 12f
             setTextColor(0xFF64748B.toInt())
-            setPadding(4, 26, 4, 0)
+            setPadding(4, 24, 4, 0)
         }, matchWrap())
 
-        setContentView(root)
+        val scroll = ScrollView(this).apply { addView(root) }
+        setContentView(scroll)
         refreshStatus()
+    }
+
+    private fun testHermesConnection() {
+        val key = currentApiKey() ?: return
+        output.text = "Sedang menguji koneksi ke Hermes..."
+        Thread {
+            try {
+                val result = hermesClient.testConnection(key)
+                runOnUiThread { output.text = result }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    output.text = "Koneksi gagal: ${error.message ?: "periksa Hermes di UserLAnd"}"
+                }
+            }
+        }.start()
+    }
+
+    private fun sendToHermes(message: String) {
+        val key = currentApiKey() ?: return
+        output.text = "JARVIS sedang menghubungi Hermes..."
+        Thread {
+            try {
+                val result = hermesClient.sendMessage(key, message)
+                runOnUiThread { output.text = "HERMES:\n\n$result" }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    output.text = "Pesan gagal dikirim: ${error.message ?: "periksa koneksi Hermes"}"
+                }
+            }
+        }.start()
+    }
+
+    private fun currentApiKey(): String? {
+        val key = secretStore.readApiKey()
+        if (key.isNullOrBlank()) {
+            output.text = "Simpan API key Hermes terlebih dahulu."
+            return null
+        }
+        return key
     }
 
     private fun handleCommand(raw: String) {
@@ -121,10 +214,17 @@ class MainActivity : Activity() {
         ).orEmpty()
         val active = enabled.contains(packageName + "/" + JarvisAccessibilityService::class.java.name)
         status.text = if (active) {
-            "Accessibility: AKTIF (service fondasi)"
+            "Accessibility: AKTIF (service fondasi) • Hermes: konfigurasi lokal"
         } else {
-            "Accessibility: BELUM AKTIF"
+            "Accessibility: BELUM AKTIF • Hermes: konfigurasi lokal"
         }
+    }
+
+    private fun sectionTitle(value: String) = TextView(this).apply {
+        text = value
+        textSize = 18f
+        setTextColor(0xFF14243A.toInt())
+        setPadding(0, 4, 0, 8)
     }
 
     private fun matchWrap() = LinearLayout.LayoutParams(
