@@ -12,6 +12,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import java.security.MessageDigest
 
 class MainActivity : Activity() {
     private lateinit var status: TextView
@@ -78,8 +79,16 @@ class MainActivity : Activity() {
                 } else {
                     secretStore.saveApiKey(key)
                     apiKeyInput.setText("")
-                    output.text = "API key tersimpan terenkripsi di Android Keystore."
+                    output.text = "API key tersimpan terenkripsi. Fingerprint tersimpan: " + keyFingerprint(key)
                 }
+            }
+        }, matchWrap())
+        root.addView(Button(this).apply {
+            text = "Lihat fingerprint API key tersimpan"
+            setOnClickListener {
+                val key = secretStore.readApiKey()
+                output.text = if (key.isNullOrBlank()) "Belum ada API key tersimpan."
+                else "Fingerprint API key tersimpan: " + keyFingerprint(key)
             }
         }, matchWrap())
         root.addView(Button(this).apply {
@@ -134,7 +143,7 @@ class MainActivity : Activity() {
         }
         root.addView(output, matchWrap())
         root.addView(TextView(this).apply {
-            text = "Koneksi memakai 127.0.0.1:8642. Pastikan Hermes API Server aktif di UserLAnd. API key disimpan terenkripsi di Android Keystore dan tidak ditulis ke source code."
+            text = "Koneksi memakai 127.0.0.1:8642. Fingerprint hanya 12 karakter SHA-256 dan tidak mengungkap API key. Pastikan Hermes API Server aktif di UserLAnd."
             textSize = 12f
             setTextColor(0xFF64748B.toInt())
             setPadding(4, 24, 4, 0)
@@ -145,16 +154,22 @@ class MainActivity : Activity() {
         refreshStatus()
     }
 
+    private fun keyFingerprint(key: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(key.toByteArray(Charsets.UTF_8))
+        return digest.take(6).joinToString("") { "%02x".format(it) }
+    }
+
     private fun testHermesConnection() {
         val key = currentApiKey() ?: return
-        output.text = "Sedang menguji koneksi ke Hermes..."
+        output.text = "Menguji Hermes. Fingerprint key Android: " + keyFingerprint(key)
         Thread {
             try {
                 val result = hermesClient.testConnection(key)
-                runOnUiThread { output.text = result }
+                runOnUiThread { output.text = result + "\nFingerprint key Android: " + keyFingerprint(key) }
             } catch (error: Exception) {
                 runOnUiThread {
-                    output.text = "Koneksi gagal: ${error.message ?: "periksa Hermes di UserLAnd"}"
+                    output.text = "Koneksi gagal: " + (error.message ?: "periksa Hermes di UserLAnd") +
+                        "\nFingerprint key Android: " + keyFingerprint(key)
                 }
             }
         }.start()
@@ -166,10 +181,10 @@ class MainActivity : Activity() {
         Thread {
             try {
                 val result = hermesClient.sendMessage(key, message)
-                runOnUiThread { output.text = "HERMES:\n\n$result" }
+                runOnUiThread { output.text = "HERMES:\n\n" + result }
             } catch (error: Exception) {
                 runOnUiThread {
-                    output.text = "Pesan gagal dikirim: ${error.message ?: "periksa koneksi Hermes"}"
+                    output.text = "Pesan gagal dikirim: " + (error.message ?: "periksa koneksi Hermes")
                 }
             }
         }.start()
