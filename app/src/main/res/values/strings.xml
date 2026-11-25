@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">JARVIS Mobile Agent</string>
+    <string name="accessibility_service_name">JARVIS Accessibility (fondasi)</string>
+    <string name="accessibility_service_description">Layanan fondasi JARVIS. Versi ini belum membaca layar atau mengendalikan aplikasi lain.</string>
+</resources>
